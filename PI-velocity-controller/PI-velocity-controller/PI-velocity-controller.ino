@@ -32,7 +32,8 @@ double t = 0.0;
 double prev_t = 0.0;
 double dt = 0.0;
 unsigned long current_time = 0;
-unsigned long experiment_run_time = 4000; // 4 seconds
+unsigned long experiment_run_time = 8000; // 4 seconds
+unsigned long DC_bias_time = 2000;
   
 // position
 long pos = 0;
@@ -52,13 +53,15 @@ double error = 0.0;
 double error_int = 0.0;
 double u = 0.0;
 double kp = 850.0; // 810.0 works if no power interruptions
-double ki = 0.000011; // 0.000031 works if no power interruptions
+double ki = 0.0000081; // 0.000031 works if no power interruptions
 
 // motor
 double countsPerShaftRev = 1200.0;
 
 // lcd
 int lcd_counts = 0;
+int lcd_fast = 250;
+int lcd_slow = 4000;
 
 
 void setup() {
@@ -83,6 +86,7 @@ void loop() {
       md.setM1Speed(0);
       error_int = 0.0;
       switch_counts = 0;
+      lcd_counts = 0;
             
       // delay for switch debounce
       delay(1000);
@@ -93,9 +97,8 @@ void loop() {
       // set switch counts to 1, reset integral error
       switch_counts = 1;
       error_int = 0.0;
-
-      Serial.println("Start Experiment");
-      
+      lcd_counts = 0;
+           
       // delay for switch debounce
       delay(1000);
       break;
@@ -103,14 +106,12 @@ void loop() {
     case change_frequency:
     {
       // change desired velocity
-      Serial.println("Change Velocity");
-
       velocity_index++;
       if (velocity_index > 2){
         velocity_index = 0;
       }
       vel_d = desired_velocities[velocity_index];
-      lcd_counts = 5500;
+      lcd_counts = 10000;
       
       // delay for switch debounce
       delay(250);
@@ -121,8 +122,7 @@ void loop() {
       // set switch counts to 2, reset integral error
       switch_counts = 2;
       error_int = 0;
-      
-      Serial.println("start");
+      lcd_counts = 0;
       
       // delay for switch debounce
       delay(1000);
@@ -137,7 +137,7 @@ void loop() {
     // set the motor speed to 0;
     md.setM1Speed(0);
     error_int = 0.0;
-    if (lcd_counts == 6000){
+    if (lcd_counts >= lcd_slow * 2){
       lcd.clear();
       lcd.setCursor(0,0);
       lcd.print("Target: ");
@@ -145,7 +145,6 @@ void loop() {
       lcd.print(vel_d);
       lcd.setCursor(0,1);
       lcd.print("Stop");
-      Serial.println("Stop");
       lcd_counts = 0;
     }
     lcd_counts++;
@@ -162,10 +161,26 @@ void loop() {
     unsigned long experiment_start_time = millis();
     current_time = millis();
 
-    // control speed for the desired experiment run time
+    // DC bias regime
+    while ((current_time - experiment_start_time) < DC_bias_time){
+      md.setM1Speed(0);
+      if (lcd_counts >= lcd_slow){
+        lcd.clear();
+        lcd.setCursor(0,0);
+        lcd.print("Target: ");
+        lcd.setCursor(9,0);
+        lcd.print(vel_d);
+        lcd_counts = 0;
+      }
+      current_time = millis();
+      lcd_counts++;
+    }
+
+    lcd_counts = 0;
+    
+    // speed control regime
     while ((current_time - experiment_start_time) < experiment_run_time){
       // check to see if button has been pressed
-//      Serial.println(current_time - experiment_start_time);
       readButtons();
 
       // otherwise control speed
@@ -223,7 +238,7 @@ void speedControl(){
   vel = vel/(2*PI);
 
   // print to the lcd
-  if (lcd_counts == 250){
+  if (lcd_counts >= lcd_fast){
     lcd.clear();
     lcd.setCursor(0,0);
     lcd.print("Target: ");
