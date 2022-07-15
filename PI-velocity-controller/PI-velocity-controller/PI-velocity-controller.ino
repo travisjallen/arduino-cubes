@@ -9,11 +9,14 @@
 #include <Encoder.h>
 #include "DualVNH5019MotorShield.h"
 #include <movingAvg.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
 
 // instantiate objects
 Encoder enc(2,3);
 DualVNH5019MotorShield md;
-movingAvg velocity_filter(16);
+movingAvg velocity_filter(32);
+LiquidCrystal_I2C lcd(0x27,16,2);
 
 // buttons
 const int no_button = 0;
@@ -28,6 +31,8 @@ int switch_counts = 0;
 double t = 0.0;
 double prev_t = 0.0;
 double dt = 0.0;
+unsigned long current_time = 0;
+unsigned long experiment_run_time = 4000; // 4 seconds
   
 // position
 long pos = 0;
@@ -35,26 +40,33 @@ double prev_pos_s = 0.0;
 
 // velocity
 double vel = 0.0;
-double vel_d = -8.0;
 double prev_vel = 0.0;
 double filter_constant = 0.78;
 int intvel = 0;
+int velocity_index = 2;
+double desired_velocities[3] = {-4.0, -6.0, -8.0};
+double vel_d = desired_velocities[velocity_index];
 
 // controller
 double error = 0.0;
 double error_int = 0.0;
 double u = 0.0;
-double kp = 800.0; // 810.0 works if no power interruptions
-double ki = 0.0; // 0.000031 works if no power interruptions
+double kp = 850.0; // 810.0 works if no power interruptions
+double ki = 0.000011; // 0.000031 works if no power interruptions
 
 // motor
 double countsPerShaftRev = 1200.0;
+
+// lcd
+int lcd_counts = 0;
 
 
 void setup() {
   Serial.begin(115200);
   md.init();  
   velocity_filter.begin();
+  lcd.init();
+  lcd.backlight();
 }
 
 
@@ -71,9 +83,9 @@ void loop() {
       md.setM1Speed(0);
       error_int = 0.0;
       switch_counts = 0;
-
+            
       // delay for switch debounce
-      delay(500);
+      delay(1000);
       break;
     }
     case start_experiment:
@@ -82,15 +94,26 @@ void loop() {
       switch_counts = 1;
       error_int = 0.0;
 
+      Serial.println("Start Experiment");
+      
       // delay for switch debounce
-      delay(500);
+      delay(1000);
       break;
     }
     case change_frequency:
     {
       // change desired velocity
+      Serial.println("Change Velocity");
+
+      velocity_index++;
+      if (velocity_index > 2){
+        velocity_index = 0;
+      }
+      vel_d = desired_velocities[velocity_index];
+      lcd_counts = 5500;
+      
       // delay for switch debounce
-      delay(500);
+      delay(250);
       break;
     }
     case start_motor:
@@ -98,15 +121,87 @@ void loop() {
       // set switch counts to 2, reset integral error
       switch_counts = 2;
       error_int = 0;
-      // delay for switch debounce
       
-      delay(500);
+      Serial.println("start");
+      
+      // delay for switch debounce
+      delay(1000);
       break;
     }
   }
 
+  //----------------------------------------------------
+  // stop/reset
+  //----------------------------------------------------
+  if (switch_counts == 0){
+    // set the motor speed to 0;
+    md.setM1Speed(0);
+    error_int = 0.0;
+    if (lcd_counts == 6000){
+      lcd.clear();
+      lcd.setCursor(0,0);
+      lcd.print("Target: ");
+      lcd.setCursor(9,0);
+      lcd.print(vel_d);
+      lcd.setCursor(0,1);
+      lcd.print("Stop");
+      Serial.println("Stop");
+      lcd_counts = 0;
+    }
+    lcd_counts++;
+  }
 
-  
+  //----------------------------------------------------
+  // start experiment
+  //----------------------------------------------------
+  if (switch_counts == 1){
+    
+    lcd_counts = 0;
+    
+    // set up timer
+    unsigned long experiment_start_time = millis();
+    current_time = millis();
+
+    // control speed for the desired experiment run time
+    while ((current_time - experiment_start_time) < experiment_run_time){
+      // check to see if button has been pressed
+//      Serial.println(current_time - experiment_start_time);
+      readButtons();
+
+      // otherwise control speed
+      speedControl();
+      current_time = millis();
+    }
+
+    // Stop the motor afterward by changing switch counts
+    switch_counts = 0;
+  }
+
+  //----------------------------------------------------
+  // start motor
+  //----------------------------------------------------
+  if (switch_counts == 2){
+    readButtons();
+    speedControl();
+  }
+}
+
+//----------------------------------------------------//----------------------------------------------------//
+
+int readButtons(){
+  int adcKeyIn = analogRead(A7);
+
+  if (adcKeyIn >= 1000) return no_button;
+  if (adcKeyIn < 30) return stop_reset;
+  if (adcKeyIn < 200) return start_experiment;
+  if (adcKeyIn < 500) return no_button;
+  if (adcKeyIn < 700) return change_frequency;
+  if (adcKeyIn < 990) return start_motor;
+
+  return no_button;
+}
+
+void speedControl(){
   // read the current position
   pos = enc.read();
   double pos_s = ((double)pos) * 2.0 * PI / countsPerShaftRev;;
@@ -127,6 +222,20 @@ void loop() {
   // convert velocity to hz
   vel = vel/(2*PI);
 
+  // print to the lcd
+  if (lcd_counts == 250){
+    lcd.clear();
+    lcd.setCursor(0,0);
+    lcd.print("Target: ");
+    lcd.setCursor(9,0);
+    lcd.print(vel_d);
+    lcd.setCursor(0,1);
+    lcd.print("Actual: ");
+    lcd.setCursor(9,1);
+    lcd.print(vel);
+    lcd_counts = 0;
+  }
+  
   // multiply vel by 100 and cast to an int to work with movingAvg library
   intvel = (int)(100 * vel);
 
@@ -154,19 +263,8 @@ void loop() {
   // update the time and position variables
   prev_t = t;
   prev_pos_s = pos_s;
-  prev_vel = vel;
+  prev_vel = vel;  
 
-}
-
-int readButtons(){
-  int adcKeyIn = analogRead(A7);
-
-  if (adcKeyIn >= 1000) return no_button;
-  if (adcKeyIn < 30) return stop_reset;
-  if (adcKeyIn < 200) return start_experiment;
-  if (adcKeyIn < 500) return no_button;
-  if (adcKeyIn < 700) return change_frequency;
-  if (adcKeyIn < 990) return start_motor;
-
-  return er0;
+  // update the lcd counts
+  lcd_counts++;
 }
