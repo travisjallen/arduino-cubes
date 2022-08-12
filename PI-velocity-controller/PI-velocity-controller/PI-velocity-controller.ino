@@ -52,8 +52,8 @@ double vel_d = desired_velocities[velocity_index];
 double error = 0.0;
 double error_int = 0.0;
 double u = 0.0;
-double proportional_gains[3] = {860.0, 860.0, 860.0};
-double integral_gains[3] = {0.0000055, 0.0000055, 0.0000055};
+double proportional_gains[3] = {800.0, 800.0, 800.0};
+double integral_gains[3] = {0.0000065, 0.0000065, 0.0000065};
 double kp = proportional_gains[velocity_index];
 double ki = integral_gains[velocity_index]; 
 
